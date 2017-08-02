@@ -1,0 +1,31 @@
+AMQP:
+    user_registered(id, name)
+    user_renamed(id, name)
+    user_deal(id, time, amount)
+    user_deal_won(id, time, amount)
+    user_connected(id)
+    user_disconnected(id)
+
+REDIS:
+    names
+     hash, id, name
+     save name: hset names id name
+     get name: hget names id
+
+    scores
+     zlist, id, score
+     save score: zadd scores id score
+     increment score: ZINCRBY scores id amount
+     get user score: zscore scores id
+     get top 10: zrevrange scores 0 10 withscores
+     get user place: zrevrank scores id
+     get -10+10 users: [calculate place-10, place+10] zrevrange scores place-10 place+10 withscores
+
+Tests:
+  1mln records:
+    1,6G mem
+    300Mb hdd
+
+  60mln records:
+    4-5G mem
+    1,2G hdd
