@@ -1,5 +1,5 @@
 CC=g++
-CFLAGS=-c -Wall -I/usr/local/include/ -std=c++11
+CFLAGS=-c -Wall -I/usr/local/include/ -std=c++11 -g
 LDFLAGS=-L/usr/local/lib64/ -lrabbitmq -lboost_system -lboost_thread -lredox -lhiredis -lev
 SOURCES=leaderboard.cpp AMQP.cpp RedisConnection.cpp
 OBJECTS=$(SOURCES:.cpp=.o)

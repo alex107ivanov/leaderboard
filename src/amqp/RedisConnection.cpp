@@ -22,48 +22,19 @@ void RedisConnection::redoxConnectedHandler()
 		}
 	}
 
-	// send all lists
-/*	for (const auto& list : _objectsLists)
+	// send saved deals
+	while (!_deals.empty())
 	{
-		const auto& objectsList = list.second;
-		// if direction is OUT
-		if (objectsList->getSyncType() != IObjectsList::ACCEPT)
+		_out << "RedisConnection::redoxConnectedHandler(): got " << _deals.size() << " deals in queue." << std::endl;
+		const auto& deal = _deals.top();
+		if (storeDeal(deal))
 		{
-			std::vector<std::string> cmd;
-			cmd.push_back("HMSET");
-			cmd.push_back(objectsList->getType());
-
-			_out << Logstream::INFO << "RedisConnection::redoxConnectedHandler(): Sending full list " << objectsList->getType() << " state." << std::endl;
-			std::vector<const IObject*> oList = objectsList->getAllObjects(this);
-			for (auto objIt = oList.begin(), objEnd = oList.end(); objIt != objEnd; ++objIt)
-			{
-				const auto& uid = (*objIt)->getUid();
-				auto data = ::join((*objIt)->serialize(), "|");
-				objectsList->clearChanges(this, *objIt);
-				cmd.push_back(uid);
-				cmd.push_back(data);
-			}
-			if (cmd.size() > 2)
-			{
-				if (_redox.isConnected())
-				{
-					_redox->command<std::string>(cmd, std::bind(&RedisConnection::commandReplyHandler, this, std::placeholders::_1));
-					_redox->publish("list:" + objectsList->getType(), "*");
-				}
-			}
-			else
-			{
-				_out << Logstream::INFO << "RedisConnection::redoxConnectedHandler(): list " << objectsList->getType() << " is empty." << std::endl;
-			}
-		}
-
-		if (objectsList->getSyncType() != IObjectsList::SEND)
-		{
-			_out << Logstream::INFO << "Requesting full list " << objectsList->getType() << " state." << std::endl;
-			_redox->command<std::vector<std::string>>({"HVALS", objectsList->getType()}, std::bind(&RedisConnection::handleGetObjectsReply, this, std::placeholders::_1, objectsList->getType()));
+			_deals.pop();
 		}
 	}
-	*/
+
+	_out << "RedisConnection::redoxConnectedHandler(): deal queue is empty." << std::endl;
+
 	return;
 }
 
@@ -113,6 +84,207 @@ void RedisConnection::join()
 		_quitCV.wait(lock);
 
 	_out << "RedisConnection::join(): finish." << std::endl;
+}
+
+void RedisConnection::storeDeal(size_t userid, float amount, size_t doy)
+{
+	_out << "RedisConnection::storeDeal(size_t userid, float amount, size_t doy)" << std::endl;
+	{
+		std::unique_lock<std::mutex> lock(_mutex);
+		if (_quit)
+		{
+			_out << "RedisConnection::storeDeal(size_t userid, float amount, size_t doy): got quit." << std::endl;
+			return;
+		}
+	}
+
+	if (!storeDeal({userid, amount, doy}))
+	{
+		_out << "RedisConnection::storeDeal(size_t userid, float amount, size_t doy): not connecting, saving deal for future." << std::endl;
+		std::unique_lock<std::mutex> lock(_mutex);
+		_deals.push({userid, amount, doy});
+	}
+
+	return;
+}
+
+bool RedisConnection::storeDeal(const Deal& deal)
+{
+	_out << "RedisConnection::storeDeal(Deal deal)" << std::endl;
+	{
+		std::unique_lock<std::mutex> lock(_mutex);
+		if (_quit)
+		{
+			_out << "RedisConnection::storeDeal(Deal deal): got quit." << std::endl;
+			return false;
+		}
+	}
+
+	std::string strUserid = std::to_string(deal.userid);
+	std::string strAmount = std::to_string(deal.amount);
+	std::string strDoy = std::to_string(deal.doy);
+	std::string procedure =
+"local userid = tonumber(ARGV[1]) "
+"local score = tonumber(ARGV[2]) "
+"local doy = tonumber(ARGV[3]) "
+" "
+"if not userid then "
+"    return 'userid is empty' "
+"end "
+" "
+"if not score then "
+"    return 'score is empty' "
+"end "
+" "
+"if not doy then "
+"    return 'doy is empty' "
+"end "
+" "
+"local current_doy = redis.call('HGET', 'user:' .. userid, 'current_doy') "
+"if tonumber(current_doy) ~= doy then "
+"  local histiry_len = redis.call('LLEN', 'score_day_history:' .. userid) "
+"  if tonumber(histiry_len) >= 6 then "
+"    local oldest_day_score = redis.call('LPOP', 'score_day_history:' .. userid) "
+"    redis.call('ZINCRBY', 'scores', -1 * tonumber(oldest_day_score), userid) "
+"  end "
+"  local current_doy_score = redis.call('HGET', 'user:' .. userid, 'current_doy_score') "
+"  if not tonumber(current_doy_score) then "
+"    current_doy_score = 0 "
+"  end "
+"  redis.call('LPUSH', 'score_day_history:' .. userid, tonumber(current_doy_score)) "
+"  redis.call('HSET', 'user:' .. userid, 'current_doy_score', 0) "
+"  redis.call('HSET', 'user:' .. userid, 'current_doy', doy) "
+"end "
+" "
+"local current_doy_score = redis.call('HGET', 'user:' .. userid, 'current_doy_score') "
+"if not tonumber(current_doy_score) then "
+"  current_doy_score = 0 "
+"end "
+"redis.call('HSET', 'user:' .. userid, 'current_doy_score', tonumber(current_doy_score) + score) "
+"redis.call('ZINCRBY', 'scores', score, userid) "
+" "
+"return tonumber(current_doy_score) + score ";
+
+	if (_redox.isConnected())
+	{
+		_redox->command<int>({"EVAL", procedure, "0", strUserid, strAmount, strDoy}, std::bind(&RedisConnection::storeDealReplyHandler, this, std::placeholders::_1));
+		return true;
+	}
+
+	return false;
+}
+
+void RedisConnection::storeDealReplyHandler(redox::Command<int>& command)
+{
+	_out << "RedisConnection::storeDealReplyHandler(redox::Command<std::string>& command)" << std::endl;
+
+	{
+		std::unique_lock<std::mutex> lock(_mutex);
+		if (_quit)
+		{
+			_out << "RedisConnection::storeDealReplyHandler(redox::Command<std::string>& command): got quit." << std::endl;
+			return;
+		}
+	}
+
+	if(!command.ok())
+	{
+		_out << "Wrong answer on command." << std::endl;
+		return;
+	}
+
+	_out << "Command complete. " << command.cmd() << ": " << command.reply() << std::endl;
+
+	return;
+}
+
+bool RedisConnection::requestUserInfo(size_t userid)
+{
+	_out << "RedisConnection::requestUserInfo(size_t userid)" << std::endl;
+	{
+		std::unique_lock<std::mutex> lock(_mutex);
+		if (_quit)
+		{
+			_out << "RedisConnection::requestUserInfo(size_t userid): got quit." << std::endl;
+			return false;
+		}
+	}
+
+	std::string strUserid = std::to_string(userid);
+	std::string procedure =
+"local userid = tonumber(ARGV[1]) "
+" "
+"if not userid then "
+"    return 'userid is empty' "
+"end "
+" "
+"local score = redis.call('ZSCORE', 'scores', userid) "
+" "
+"if not score then "
+"    return 'Userid ' .. userid .. ' not found.' "
+"end "
+" "
+"local place = redis.call('ZREVRANK', 'scores', userid) "
+"if not place then "
+"    return 'Cant get place for user ' .. userid "
+"end "
+" "
+"local start = tonumber(place) - 10 "
+"if start < 0 then "
+"    start = 0 "
+"end "
+" "
+"local stop = tonumber(place) + 10 "
+" "
+"local result = redis.call('ZREVRANGE', 'scores', start, stop, 'withscores') "
+" "
+"local top = redis.call('ZREVRANGE', 'scores', 0, 10, 'withscores') "
+" "
+"local name = redis.call('HGET', 'user:' .. userid, 'name') "
+" "
+"if not name then "
+"    name = '-' "
+"end "
+" "
+"return {name .. '', score .. '', place .. '', table.concat(result, ','), table.concat(top, ',')}";
+
+/*"return table.concat({name, score, place, result, top}, '|')";*/
+
+	if (_redox.isConnected())
+	{
+		_redox->command<std::vector<std::string>>({"EVAL", procedure, "0", strUserid}, std::bind(&RedisConnection::requestUserInfoReplyHandler, this, std::placeholders::_1));
+		return true;
+	}
+
+	return false;
+}
+
+void RedisConnection::requestUserInfoReplyHandler(redox::Command<std::vector<std::string>>& command)
+{
+	_out << "RedisConnection::requestUserInfoReplyHandler(redox::Command<std::string>& command)" << std::endl;
+
+	{
+		std::unique_lock<std::mutex> lock(_mutex);
+		if (_quit)
+		{
+			_out << "RedisConnection::requestUserInfoReplyHandler(redox::Command<std::string>& command): got quit." << std::endl;
+			return;
+		}
+	}
+
+	if(!command.ok())
+	{
+		_out << "Wrong answer on command." << std::endl;
+		return;
+	}
+
+	_out << "Command complete. " << command.cmd() << ": " << std::endl;
+	for (const auto& line : command.reply())
+	{
+		std::cout << "      DATA: " << line << std::endl;
+	}
+
+	return;
 }
 
 /*

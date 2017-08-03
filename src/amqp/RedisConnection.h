@@ -5,7 +5,7 @@
 
 #include <google/protobuf/message.h>
 
-#include <map>
+#include <stack>
 #include <memory>
 #include <mutex>
 #include <iostream>
@@ -24,7 +24,18 @@ public:
 
 	void quit();
 
+	void storeDeal(size_t userid, float amount, size_t doy);
+
+	bool requestUserInfo(size_t userid);
+
 private:
+	struct Deal
+	{
+		size_t userid;
+		float amount;
+		size_t doy;
+	};
+
 	template<typename T>
 	class Connection
 	{
@@ -199,6 +210,12 @@ private:
 
 	void redoxConnectedHandler();
 
+	void storeDealReplyHandler(redox::Command<int>& command);
+
+	bool storeDeal(const Deal& deal);
+
+	void requestUserInfoReplyHandler(redox::Command<std::vector<std::string>>& command);
+
 /*
 	void handleGetObjectsReply(redox::Command<std::vector<std::string>>& command, std::string list);
 
@@ -231,6 +248,9 @@ private:
 
 	bool _quit;
 	std::condition_variable _quitCV;
+
+
+	std::stack<Deal> _deals;
 };
 
 #endif
