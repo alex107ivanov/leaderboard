@@ -7,10 +7,15 @@ AMQP:
     user_disconnected(id)
 
 REDIS:
-    names
-     hash, id, name
-     save name: hset names id name
-     get name: hget names id
+    score_day_history:id
+     list
+     day_score
+
+    user:id
+     hash
+     name, current_doy, current_doy_score
+     save name: hset user:id name
+     get name: hget user:id name
 
     scores
      zlist, id, score
@@ -20,6 +25,96 @@ REDIS:
      get top 10: zrevrange scores 0 10 withscores
      get user place: zrevrank scores id
      get -10+10 users: [calculate place-10, place+10] zrevrange scores place-10 place+10 withscores
+
+ALG:
+    if users[id].current_day != doy:
+      if len(score_day_history:id) >= 6:
+        dayScore = lpop score_day_history:id
+        scores[id] -= dayScore
+      lpush score_day_history:id users[id].current_doy_score
+      users[id].current_doy_score = 0
+      users[id].current_day = doy
+    users[id].current_doy_score += score
+    scores[id] += score
+
+LUA:
+
+/// LUA BEGIN: store scores for user
+local userid = tonumber(ARGV[1])
+local score = tonumber(ARGV[2])
+local doy = tonumber(ARGV[3])
+
+if not userid then
+    return 'userid is empty'
+end
+
+if not score then
+    return 'score is empty'
+end
+
+if not doy then
+    return 'doy is empty'
+end
+
+local current_doy = redis.call('HGET', 'user:' .. userid, 'current_doy')
+if tonumber(current_doy) ~= doy then
+  local histiry_len = redis.call('LLEN', 'score_day_history:' .. userid)
+  if tonumber(histiry_len) >= 6 then
+    local oldest_day_score = redis.call('LPOP', 'score_day_history:' .. userid)
+    redis.call('ZINCRBY', 'scores', -1 * tonumber(oldest_day_score), userid)
+  end
+  local current_doy_score = redis.call('HGET', 'user:' .. userid, 'current_doy_score')
+  if not tonumber(current_doy_score) then
+    current_doy_score = 0
+  end
+  redis.call('LPUSH', 'score_day_history:' .. userid, tonumber(current_doy_score))
+  redis.call('HSET', 'user:' .. userid, 'current_doy_score', 0)
+  redis.call('HSET', 'user:' .. userid, 'current_doy', doy)
+end
+
+local current_doy_score = redis.call('HGET', 'user:' .. userid, 'current_doy_score')
+if not tonumber(current_doy_score) then
+  current_doy_score = 0
+end
+redis.call('HSET', 'user:' .. userid, 'current_doy_score', tonumber(current_doy_score) + score)
+redis.call('ZINCRBY', 'scores', score, userid)
+
+return tonumber(current_doy_score) + score
+/// LUA END
+
+/// LUA BEGIN: fetch top 10, user score, place & prev+next 10 places
+local userid = tonumber(ARGV[1])
+
+if not userid then
+    return 'userid is empty'
+end
+
+local score = redis.call('ZSCORE', 'scores', userid)
+
+if not score then
+    return "Userid " .. userid .. " not found."
+end
+
+local place = redis.call('ZREVRANK', 'scores', userid)
+if not place then
+    return "Cant get place for user " .. userid
+end
+
+local start = tonumber(place) - 10
+if start < 0 then
+    start = 0
+end
+
+local stop = tonumber(place) + 10
+
+local result = redis.call('ZREVRANGE', 'scores', start, stop, 'withscores')
+
+local top = redis.call('ZREVRANGE', 'scores', 0, 10, 'withscores')
+
+local name = redis.call('HGET', 'user:' .. userid, 'name')
+
+return {name, score, place, result, top}
+/// BUA END
 
 Tests:
   1mln records:

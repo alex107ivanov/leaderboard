@@ -1,3 +1,5 @@
+#include "AMQP.h"
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -8,15 +10,22 @@
 #include <amqp_framing.h>
 
 #include <assert.h>
+#include <chrono>
 
-#include "../../include/logstream/Logstream.h"
+// for struct timeval
+#ifdef _WIN32
+#pragma push_macro("_WINSOCKAPI_")
+#undef _WINSOCKAPI_
+#include <winsock2.h> 
+#pragma pop_macro("_WINSOCKAPI_")
+#endif
 
-#include "../../include/exchange/AMQP.h"
-
-AMQP::AMQP(Logstream& out, const std::string& host, int port, const std::string& login, const std::string& password, const std::string& vhost) :
+AMQP::AMQP(std::iostream& out, const std::string& host, int port, const std::string& login, const std::string& password, const std::string& vhost) :
 	_out(out), _host(host), _port(port), _login(login), _password(password), _vhost(vhost), _quit(false), _connected(false)
 {
-	_thread.reset(new boost::thread(boost::bind(&AMQP::run, this)));
+	_outputBuffer.set_capacity(512);
+	_inputThread.reset(new boost::thread(boost::bind(&AMQP::inputRun, this)));
+	_outputThread.reset(new boost::thread(boost::bind(&AMQP::outputRun, this)));
 }
 
 AMQP::~AMQP()
@@ -39,7 +48,10 @@ AMQP::~AMQP()
 		_out << "[AMQP] destructor waiting for thread." << std::endl;
 	}
 
-	_thread->join();
+	_conditionVariable.notify_all();
+
+	_inputThread->join();
+	_outputThread->join();
 
 	_out << "[AMQP] destructor finished." << std::endl;
 }
@@ -70,8 +82,8 @@ void AMQP::disconnect()
 
 void AMQP::addQueue(const std::string& name, bool ack)
 {
-	if (!connect())
-		return;
+//	if (!connect())
+//		return;
 
 	boost::mutex::scoped_lock lock(_mutex);
 
@@ -79,7 +91,8 @@ void AMQP::addQueue(const std::string& name, bool ack)
 
 	_queues.push_back(queue);
 
-	loadQueue(queue);
+	if (_connected)
+		loadQueue(queue);
 
 	return;
 }
@@ -87,6 +100,16 @@ void AMQP::addQueue(const std::string& name, bool ack)
 void AMQP::loadQueue(const Queue& queue)
 {
 	amqp_basic_consume(_connection, 1, to_amqp_bytes(queue.name), amqp_empty_bytes, 0, (queue.ack ? 0 : 1), 0, amqp_empty_table);
+	/*
+	amqp_connection_state_t state, 
+	amqp_channel_t channel, 
+	amqp_bytes_t queue, 
+	amqp_bytes_t consumer_tag, 
+	amqp_boolean_t no_local, 
+	amqp_boolean_t no_ack, 
+	amqp_boolean_t exclusive, 
+	amqp_table_t arguments
+	*/
 
 	if (!showError(amqp_get_rpc_reply(_connection)))
 	{
@@ -102,8 +125,8 @@ void AMQP::loadQueue(const Queue& queue)
 
 void AMQP::addExchange(const std::string& name, const std::string& type, const std::string& routingKey, bool listen)
 {
-	if (!connect())
-		return;
+//	if (!connect())
+//		return;
 
 	boost::mutex::scoped_lock lock(_mutex);
 
@@ -111,7 +134,8 @@ void AMQP::addExchange(const std::string& name, const std::string& type, const s
 
 	_exchanges.push_back(exchange);
 
-	loadExchange(exchange);
+	if (_connected)
+		loadExchange(exchange);
 
 	return;
 }
@@ -121,6 +145,18 @@ void AMQP::loadExchange(const Exchange& exchange)
 	amqp_exchange_declare(_connection, 1, to_amqp_bytes(exchange.name), to_amqp_bytes(exchange.type),
 				0, 0, 0, 0, amqp_empty_table);
 
+//	amqp_exchange_declare(_connection, 1, to_amqp_bytes(exchange.name), to_amqp_bytes(exchange.type),
+//				0, 0, amqp_empty_table);
+
+/*
+amqp_connection_state_t state, 
+amqp_channel_t channel, 
+amqp_bytes_t exchange, 
+amqp_bytes_t type, 
+amqp_boolean_t passive, 
+amqp_boolean_t durable, 
+amqp_table_t arguments
+*/
 	showError(amqp_get_rpc_reply(_connection));
 
 	if (!exchange.listen)
@@ -146,11 +182,42 @@ void AMQP::send(const std::string& exchange, const std::string& routingKey, cons
 {
 	_out << "[AMQP] Storing message of " << data.size() << " bytes to '" << exchange << "'/'" << routingKey << "' to output queue." << std::endl;
 
-	boost::mutex::scoped_lock lock(_mutex);
+	const auto& beginTime = std::chrono::high_resolution_clock::now();
 
-	_inputBuffer.push_back({exchange, routingKey, data, persistent});
+	while(true)
+	{
+		bool full = false;
+		{
+			boost::mutex::scoped_lock lock(_mutex);
+			//_out << "[AMQP] Output buffer contains " << _outputBuffer.size() << " elements." << std::endl;
+			full = _outputBuffer.full();
+		}
 
-	_conditionVariable.notify_all();
+		if (full)
+		{
+			//_out << "[AMQP] Output buffer is full!" << std::endl;
+			boost::this_thread::sleep(boost::posix_time::milliseconds(10));
+		}
+		else
+		{
+			break;
+		}
+	}
+
+	{
+		boost::mutex::scoped_lock lock(_mutex);
+
+		_outputBuffer.push_back({exchange, routingKey, data, persistent});
+
+		_conditionVariable.notify_all();
+	}
+
+	const auto& endTime = std::chrono::high_resolution_clock::now();
+	const auto& msec = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - beginTime).count();
+	if (msec > 100)
+	{
+		_out << "[AMQP] message stored in " << msec << " msec." << std::endl;
+	}
 
 	return;
 }
@@ -206,26 +273,9 @@ bool AMQP::showError(amqp_rpc_reply_t x)
 	return false;
 }
 
-void AMQP::reconnect()
-{
-	boost::mutex::scoped_lock lock(_mutex);
-
-	disconnect();
-
-	connect();
-
-	return;
-}
-
 bool AMQP::connect()
 {
 	boost::mutex::scoped_lock lock(_mutex);
-
-	if (_quit)
-		return false;
-
-	if (_connected)
-		return true;
 
 	int tryCount = 0;
 
@@ -234,16 +284,23 @@ bool AMQP::connect()
 		if (tryCount > 0)
 		{
 			_out << "[AMQP] Not first try. Sleeping..." << std::endl;
-
+			lock.unlock();
 			boost::this_thread::sleep(boost::posix_time::seconds(5));
+			lock.lock();
 		}
+
+		if (_quit)
+			return false;
+
+		if (_connected)
+			return true;
 
 		++tryCount;
 
-		_out << "[AMQP] [" << tryCount << "] Trying to connect..." << std::endl;
+		_out << "[AMQP] [" << tryCount << "] Trying to connect to " << _host << " : " << _port << "..." << std::endl;
 
 		int status;
-		amqp_socket_t *socket = NULL;
+		amqp_socket_t* socket = nullptr;
 
 		_connection = amqp_new_connection();
 
@@ -256,7 +313,10 @@ bool AMQP::connect()
 
 		_out << "[AMQP] TCP socket created." << std::endl;
 
-		status = amqp_socket_open(socket, _host.c_str(), _port);
+		struct timeval timeout;
+		timeout.tv_sec = 5;
+		timeout.tv_usec = 0;
+		status = amqp_socket_open_noblock(socket, _host.c_str(), _port, &timeout);
 		if (status)
 		{
 			_out << "[AMQP] Error connecting socket." << std::endl;
@@ -265,7 +325,9 @@ bool AMQP::connect()
 
 		_out << "[AMQP] TCP socket connected." << std::endl;
 
-		if (!showError(amqp_login(_connection, _vhost.c_str(), 0, 131072, 0, AMQP_SASL_METHOD_PLAIN, _login.c_str(), _password.c_str())))
+		
+
+		if (!showError(amqp_login(_connection, _vhost.c_str(), 0, 131072/*frame max*/, 60/*heartbeat*/, AMQP_SASL_METHOD_PLAIN, _login.c_str(), _password.c_str())))
 		{
 			_out << "[AMQP] Error while login." << std::endl;
 			continue;
@@ -284,6 +346,16 @@ bool AMQP::connect()
 		_out << "[AMQP] Channel opened." << std::endl;
 
 		amqp_basic_consume(_connection, 1, amqp_cstring_bytes("amq.rabbitmq.reply-to"), amqp_empty_bytes, 0, 1, 0, amqp_empty_table);
+		/*
+		amqp_connection_state_t state, 
+		amqp_channel_t channel, 
+		amqp_bytes_t queue, 
+		amqp_bytes_t consumer_tag, 
+		amqp_boolean_t no_local, 
+		amqp_boolean_t no_ack, 
+		amqp_boolean_t exclusive, 
+		amqp_table_t arguments
+		*/
 		if (!showError(amqp_get_rpc_reply(_connection)))
 		{
 			_out << "[AMQP] Error on amqp_basic_consume(amq.rabbitmq.reply-to)" << std::endl;
@@ -294,6 +366,16 @@ bool AMQP::connect()
 
 		{
 			amqp_queue_declare_ok_t *r = amqp_queue_declare(_connection, 1, amqp_empty_bytes, 0, 0, 0, 1, amqp_empty_table);
+			/*
+			amqp_connection_state_t		state,
+			amqp_channel_t 	channel,
+			amqp_bytes_t 	queue,
+			amqp_boolean_t 	passive,
+			amqp_boolean_t 	durable,
+			amqp_boolean_t 	exclusive,
+			amqp_boolean_t 	auto_delete,
+			amqp_table_t 	arguments
+			*/
 			if (!showError(amqp_get_rpc_reply(_connection)))
 			{
 				_out << "[AMQP] Error while creating direct queue." << std::endl;
@@ -306,6 +388,16 @@ bool AMQP::connect()
 		}
 
 		amqp_basic_consume(_connection, 1, to_amqp_bytes(_directQueue), amqp_empty_bytes, 0, 0, 0, amqp_empty_table);
+		/*
+		amqp_connection_state_t state, 
+		amqp_channel_t channel, 
+		amqp_bytes_t queue, 
+		amqp_bytes_t consumer_tag, 
+		amqp_boolean_t no_local, 
+		amqp_boolean_t no_ack, 
+		amqp_boolean_t exclusive, 
+		amqp_table_t arguments
+		*/
 		if (!showError(amqp_get_rpc_reply(_connection)))
 		{
 			_out << "[AMQP] Error on amqp_basic_consume('" << _directQueue << "')" << std::endl;
@@ -343,7 +435,9 @@ void AMQP::inputRun()
 
 		struct timeval timeout;
 		timeout.tv_sec = 0;
-		timeout.tv_usec = 100000;
+		timeout.tv_usec = 10000; // 0.01 sec
+//		timeout.tv_sec = 1;
+//		timeout.tv_usec = 0; // 1 sec
 
 		res = amqp_consume_message(_connection, &envelope, &timeout, 0);
 
@@ -357,13 +451,15 @@ void AMQP::inputRun()
 			if(!showError(amqp_basic_ack(_connection, 1, envelope.delivery_tag, 0)))
 			{
 				_out << "[AMQP] Error while amqp_basic_ack." << std::endl;
+				disconnect();
+			}
+			else
+			{
+				lock.unlock();
+				onMessage(message.exchange, message.routingKey, message.contentType, message.replyTo, message.data);
 			}
 
 			amqp_destroy_envelope(&envelope);
-
-			lock.unlock();
-
-			onMessage(message.exchange, message.routingKey, message.contentType, message.replyTo, message.data);
 
 			continue;
 		}
@@ -381,7 +477,7 @@ void AMQP::inputRun()
 		}
 		lock.unlock();
 
-		boost::this_thread::sleep(boost::posix_time::milliseconds(50));
+		boost::this_thread::sleep(boost::posix_time::milliseconds(1));
 	}
 
 	_out << "[AMQP] inputRun finished." << std::endl;
@@ -425,10 +521,20 @@ void AMQP::outputRun()
 {
 	while (!_quit)
 	{
+		boost::this_thread::sleep(boost::posix_time::milliseconds(1));
+
 		boost::mutex::scoped_lock lock(_mutex);
 
-		while (_outputBuffer.empty())
+		while (!_quit && _outputBuffer.empty())
 			_conditionVariable.wait(lock);
+
+		if (_quit)
+		{
+			_out << "[AMQP] AMQP::outputRun(): got quit flag." << std::endl;
+			break;
+		}
+
+		_out << "[AMQP] We got " << _outputBuffer.size() << " messages in output queue." << std::endl;
 
 		lock.unlock();
 
@@ -438,19 +544,25 @@ void AMQP::outputRun()
 			continue;
 		}
 
+		const auto& beginTime = std::chrono::high_resolution_clock::now();
+		size_t sentCount = 0;
+
 		while (true)
 		{
 			lock.lock();
 
-			if (_inputBuffer.empty())
+			if (_outputBuffer.empty())
+			{
+				_out << "[AMQP] Ouptup queue is empty." << std::endl;
 				break;
+			}
 
 			const auto& message = _outputBuffer.front();
 			const auto& data = message.data;
 			const auto& exchange = message.exchange;
-			const auto& routingKey = message.routingKey;
+			const auto& routingKey = message.queue;
 			const auto& persistent = message.persistent;
-			_out << "[AMQP] Sending message of " << data.size() << " bytes to '" << exchange << "'/'" << routingKey << "'" << std::endl;
+			_out << "[AMQP] Sending message [first of " <<_outputBuffer.size() << "] of " << data.size() << " bytes to '" << exchange << "'/'" << routingKey << "'" << std::endl;
 
 			amqp_basic_properties_t props;
 
@@ -471,11 +583,33 @@ void AMQP::outputRun()
 				0, 0, &props, to_amqp_bytes(data))))
 			{
 				_out << "[AMQP] Error on amqp_basic_publish" << std::endl;
+				disconnect();
+				break;
 			}
 
 			_outputBuffer.pop_front();
 
 			lock.unlock();
+
+			//boost::this_thread::sleep(boost::posix_time::milliseconds(1));
+
+			++sentCount;
+
+			if (sentCount > 0 && sentCount % 500 == 0)
+			{
+				const auto& endTime = std::chrono::high_resolution_clock::now();
+				const auto& msec = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - beginTime).count();
+				const auto& speed = static_cast<float>(msec * 1000.0) / sentCount;
+				_out << "[AMQP] " << sentCount << " messages sent, output speed is " << speed << " pkg/sec." << std::endl;
+			}
+		}
+
+		if (sentCount > 100)
+		{
+			const auto& endTime = std::chrono::high_resolution_clock::now();
+			const auto& msec = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - beginTime).count();
+			const auto& speed = static_cast<float>(msec * 1000.0) / sentCount;
+			_out << "[AMQP] " << sentCount << " messages sent, output speed is " << speed << " pkg/sec." << std::endl;
 		}
 	}
 
@@ -489,14 +623,19 @@ void AMQP::quit()
 {
 	_quit = true;
 
-	_thread->join();
+	_conditionVariable.notify_all();
+
+	_inputThread->join();
+
+	_outputThread->join();
 
 	return;
 }
 
 void AMQP::join()
 {
-	_thread->join();
+	_inputThread->join();
+	_outputThread->join();
 }
 
 template<> inline

@@ -1,5 +1,11 @@
+#if defined(_MSC_VER) && _MSC_VER >= 1400 
+#pragma warning(push) 
+#pragma warning(disable:4996) 
+#endif 
+
 #include <vector>
 #include <string>
+#include <iostream>
 
 #include <amqp.h>
 
@@ -9,12 +15,10 @@
 #include <boost/signals2.hpp>
 #include <boost/circular_buffer.hpp>
 
-class Logstream;
-
 class AMQP : boost::noncopyable
 {
 public:
-	AMQP(Logstream& _out, const std::string& host, int port, const std::string& login, const std::string& password, const std::string& vhost);
+	AMQP(std::iostream& _out, const std::string& host, int port, const std::string& login, const std::string& password, const std::string& vhost);
 
 	~AMQP();
 
@@ -60,7 +64,7 @@ private:
 		std::string queue;
 		std::string data;
 		bool persistent;
-	}
+	};
 
 	template<typename T>
 	inline amqp_bytes_t to_amqp_bytes(const T& data, bool copy = false)
@@ -83,14 +87,12 @@ private:
 
 	bool connect();
 
-	void reconnect();
-
 	void disconnect();
 
-	void runInput();
-	void runOutput();
+	void inputRun();
+	void outputRun();
 
-	Logstream& _out;
+	std::iostream& _out;
 	std::string _host;
 	int _port;
 	std::string _login;
@@ -109,7 +111,7 @@ private:
 	std::vector<Exchange> _exchanges;
 	std::string _directQueue;
 
-	boost::circular_buffer<OutputMessage> _outputBuffer(128);
+	boost::circular_buffer<OutputMessage> _outputBuffer;
 };
 
 template<> inline
