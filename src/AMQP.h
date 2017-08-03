@@ -1,8 +1,3 @@
-#if defined(_MSC_VER) && _MSC_VER >= 1400 
-#pragma warning(push) 
-#pragma warning(disable:4996) 
-#endif 
-
 #include <vector>
 #include <string>
 #include <iostream>
@@ -15,10 +10,10 @@
 #include <boost/signals2.hpp>
 #include <boost/circular_buffer.hpp>
 
-class AMQP : boost::noncopyable
+class AMQP : private boost::noncopyable
 {
 public:
-	AMQP(std::iostream& _out, const std::string& host, int port, const std::string& login, const std::string& password, const std::string& vhost);
+	AMQP(std::ostream& _out, const std::string& host, int port, const std::string& login, const std::string& password, const std::string& vhost);
 
 	~AMQP();
 
@@ -92,7 +87,7 @@ private:
 	void inputRun();
 	void outputRun();
 
-	std::iostream& _out;
+	std::ostream& _out;
 	std::string _host;
 	int _port;
 	std::string _login;

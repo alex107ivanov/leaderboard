@@ -1,32 +1,22 @@
 #ifndef REDISCONNECTION_H_DEFINED
 #define REDISCONNECTION_H_DEFINED
 
-#include <boost/noncopyable.hpp>
-#include <boost/signals2.hpp>
-
-#include <google/protobuf/message.h>
-
 #include <stack>
 #include <memory>
 #include <mutex>
 #include <iostream>
 #include <condition_variable>
 
+#include <boost/noncopyable.hpp>
+#include <boost/signals2.hpp>
+
 #include <redox.hpp>
+
+#include "UserInfo.h"
 
 class RedisConnection : private boost::noncopyable
 {
 public:
-	struct UserInfo
-	{
-		size_t userid;
-		std::string name;
-		size_t place;
-		float amount;
-		std::vector<std::pair<size_t, float>> top;
-		std::vector<std::pair<size_t, float>> around;
-	};
-
 	RedisConnection(std::ostream& out, const std::string& host, int port);
 
 	~RedisConnection();
@@ -40,6 +30,10 @@ public:
 	bool requestUserInfo(size_t userid);
 
 	boost::signals2::signal<void (const UserInfo&)> onUserInfo;
+
+	void printStatistics();
+
+	bool complete();
 
 private:
 	struct Deal
@@ -67,98 +61,139 @@ private:
 
 		bool isConnected()
 		{
+#ifdef _DEBUG
 			_out << "Connection::isConnected()" << std::endl;
+#endif
 			std::unique_lock<std::mutex> lock(_mutex);
 			auto status = ((_connection.get() != nullptr) && (_connected));
+#ifdef _DEBUG
 			_out << "Connection::isConnected(): " << status << std::endl;
+#endif
 			return status;
 		}
 
 		T* operator->()
 		{
+#ifdef _DEBUG
 			_out << "Connection::operator->()" << std::endl;
+#endif
 			if (!isConnected())
 			{
+#ifdef _DEBUG
 				_out << "Connection::operator->(): trying to access unconnected connection!" << std::endl;
+#endif
 				return nullptr;
 			}
+#ifdef _DEBUG
 			_out << "Connection::operator->(): connection ok." << std::endl;
+#endif
 			return _connection.get(); 
 		}
 
 		void disconnect()
 		{
+#ifdef _DEBUG
 			_out << "Connection::disconnect()" << std::endl;
+#endif
 			{
+#ifdef _DEBUG
 				_out << "Connection::disconnect(): setting quit flag." << std::endl;
+#endif
 				std::unique_lock<std::mutex> lock(_mutex);
 				_quit = true;
 			}
 			_connectionCV.notify_one();
+#ifdef _DEBUG
 			_out << "Connection::disconnect(): waiting for connection thread." << std::endl;
+#endif
 			if (_connectionThread.joinable())
+			{
 				_connectionThread.join();
+			}
 			else
+			{
+#ifdef _DEBUG
 				_out << "Connection::disconnect(): thread is not joinable :-/" << std::endl;
+#endif
+			}
+#ifdef _DEBUG
 			_out << "Connection::disconnect(): finished." << std::endl;
+#endif
 		}
 
 		~Connection()
 		{
+#ifdef _DEBUG
 			_out << "Connection::~Connection()" << std::endl;
+#endif
 			disconnect();
-			//_connectionThread.join();
+#ifdef _DEBUG
 			_out << "Connection::~Connection(): finished." << std::endl;
+#endif
 		}
 
 	private:
 		void run()
 		{
+//#ifdef _DEBUG
 			_out << "Connection::run()" << std::endl;
+//#endif
 
 			std::unique_lock<std::mutex> lock(_mutex);
 			while (!_quit)
 			{
 				if (_connected && !_quit)
 				{
+#ifdef _DEBUG
 					_out << "Connection::run(): connection done, waiting for reconnect or quit signal." << std::endl;
+#endif
 					_connectionCV.wait(lock);
 				}
 
 				if (_quit)
 				{
+//#ifdef _DEBUG
 					_out << "Connection::run(): got signal for quit." << std::endl;
+//#endif
 					break;
 				}
 				else if (_connected)
 				{
+//#ifdef _DEBUG
 					_out << "Connection::run(): got signal for reconnect." << std::endl;
+//#endif
 				}
 
 				_connected = false;
 
 				if (_connection.get() != nullptr)
 				{
+#ifdef _DEBUG
 					_out << "Connection::run(): not first connection try. Sleep." << std::endl;
-					//lock.unlock();
+#endif
 					std::this_thread::sleep_for(std::chrono::seconds(_sleepSeconds));
-					//lock.lock();
+#ifdef _DEBUG
 					_out << "Connection::run(): sleep done." << std::endl;
+#endif
 				}
 				else
 				{
+#ifdef _DEBUG
 					_out << "Connection::run(): first start, no sleep." << std::endl;
+#endif
 				}
 
 				_connection.reset(new T);
 
+//#ifdef _DEBUG
 				_out << "Connection::run(): trying to connect " << _host << ":" << _port << "." << std::endl;
-				//lock.unlock();
+//#endif
 				auto result = _connection->connect(_host, _port, std::bind(&Connection<T>::connectionStateChanged, this, std::placeholders::_1));
-				//lock.lock();
 				if (result)
 				{
+//#ifdef _DEBUG
 					_out << "Connection::run(): Connection successfull, calling handler!" << std::endl;
+//#endif
 					_connected = true;
 					lock.unlock();
 					_connectedHandler();
@@ -166,32 +201,43 @@ private:
 				}
 				else
 				{
+//#ifdef _DEBUG
 					_out << "Connection::run(): Connection error!" << std::endl;
+//#endif
 				}
 			}
+#ifdef _DEBUG
 			_out << "Connection::run(): main cycle finished. Removing connection." << std::endl;
+#endif
 			if (_connection.get() != nullptr)
 			{
+#ifdef _DEBUG
 				_out << "Connection::run(): found active connection. Stoping it." << std::endl;
+#endif
 				_connection->stop();
 				_connection->wait();
+#ifdef _DEBUG
 				_out << "Connection::run(): active connection Stopped." << std::endl;
+#endif
 			}
 			_connected = false;
-			//lock.unlock();
 			_connection.reset(nullptr);
-			//lock.lock();
+#ifdef _DEBUG
 			_out << "Connection::run(): finished." << std::endl;
+#endif
 		}
 
 		void connectionStateChanged(int status)
 		{
+#ifdef _DEBUG
 			_out << "Connection::connectionStateChanged(" << status << ")" << std::endl;
-			//std::unique_lock<std::mutex> lock(_mutex);
+#endif
 			switch (status)
 			{
 			case redox::Redox::CONNECTED :
+#ifdef _DEBUG
 				_out << "Connection::connectionStateChanged(" << status << "): connected." << std::endl;
+#endif
 				break;
 
 			case redox::Redox::NOT_YET_CONNECTED :
@@ -200,7 +246,9 @@ private:
 			case redox::Redox::DISCONNECT_ERROR :
 			case redox::Redox::INIT_ERROR :
 			default :
+#ifdef _DEBUG
 				_out << "Connection::connectionStateChanged(" << status << "): connection error." << std::endl;
+#endif
 				_connectionCV.notify_one();
 				break;
 			}
@@ -229,40 +277,15 @@ private:
 
 	void requestUserInfoReplyHandler(redox::Command<std::vector<std::string>>& command);
 
-/*
-	void handleGetObjectsReply(redox::Command<std::vector<std::string>>& command, std::string list);
-
-	void replyHandler(redox::Command<int>& command);
-
-	void getCommandReplyHandler(redox::Command<std::string>& command, std::string list, std::string id);
-
-	void commandReplyHandler(redox::Command<std::string>& command);
-
-	void handleMessage(const std::string& exchange, const std::string& data);
-
-	void updateObject(const std::string& listType, const std::vector<std::string>& fields, const IConnection* connection);
-
-	void addQueueObject(const std::string& listType, const std::vector<std::string>& fields);
-
-	void objectsQueueChangesHandler(const IConnection* const connection, IObjectsQueue* iObjectsQueue);
-
-	void objectsListChangesHandler(const IObjectsList::ChangeType& changeType, IObject& iObject, IObjectsList& iObjectsList, const IConnection* connection);
-*/
-
 	std::ostream& _out;
-
 	Connection<redox::Redox> _redox;
-
-	uint32_t hash(const std::string& string);
-
-	//boost::signals2::signal<void (const std::string& /*type*/, const std::string& /*data*/)> onPBMessage;
-
 	std::mutex _mutex;
-
 	bool _quit;
+	size_t _sentDeals;
+	size_t _completeDeals;
+	size_t _sentUserInfoRequests;
+	size_t _completeUserInfoRequests;
 	std::condition_variable _quitCV;
-
-
 	std::stack<Deal> _deals;
 };
 

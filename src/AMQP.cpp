@@ -12,15 +12,7 @@
 #include <assert.h>
 #include <chrono>
 
-// for struct timeval
-#ifdef _WIN32
-#pragma push_macro("_WINSOCKAPI_")
-#undef _WINSOCKAPI_
-#include <winsock2.h> 
-#pragma pop_macro("_WINSOCKAPI_")
-#endif
-
-AMQP::AMQP(std::iostream& out, const std::string& host, int port, const std::string& login, const std::string& password, const std::string& vhost) :
+AMQP::AMQP(std::ostream& out, const std::string& host, int port, const std::string& login, const std::string& password, const std::string& vhost) :
 	_out(out), _host(host), _port(port), _login(login), _password(password), _vhost(vhost), _quit(false), _connected(false)
 {
 	_outputBuffer.set_capacity(512);

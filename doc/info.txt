@@ -116,6 +116,40 @@ local name = redis.call('HGET', 'user:' .. userid, 'name')
 return {name, score, place, result, top}
 /// BUA END
 
+/// LUA BEGIN: iterate over all users on new day
+local doy = tonumber(ARGV[1])
+
+if not doy then
+    return 'doy is empty'
+end
+
+local matches = redis.call('KEYS', 'user:*')
+
+local done = 0
+
+for _, key in ipairs(matches) do
+  local _, userid = string.match(key, '(.*)%:(.*)')
+  local current_doy = redis.call('HGET', 'user:' .. userid, 'current_doy')
+  if tonumber(current_doy) ~= doy then
+    local histiry_len = redis.call('LLEN', 'score_day_history:' .. userid)
+    if tonumber(histiry_len) >= 6 then
+      local oldest_day_score = redis.call('LPOP', 'score_day_history:' .. userid)
+      redis.call('ZINCRBY', 'scores', -1 * tonumber(oldest_day_score), userid)
+    end
+    local current_doy_score = redis.call('HGET', 'user:' .. userid, 'current_doy_score')
+    if not tonumber(current_doy_score) then
+      current_doy_score = 0
+    end
+    redis.call('LPUSH', 'score_day_history:' .. userid, tonumber(current_doy_score))
+    redis.call('HSET', 'user:' .. userid, 'current_doy_score', 0)
+    redis.call('HSET', 'user:' .. userid, 'current_doy', doy)
+  done = done + 1
+  end
+end
+
+return done
+/// LUA END
+
 Tests:
   1mln records:
     1,6G mem
