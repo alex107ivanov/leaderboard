@@ -1,0 +1,46 @@
+syntax = "proto2";
+
+package leaderboard;
+
+message UserRegistered {
+  required int32 userid = 1;
+  required string name = 2;
+}
+
+message UserRenamed {
+  required int32 userid = 1;
+  required string name = 2;
+}
+
+message UserDeal {
+  required int32 userid = 1;
+  required int32 time = 2;
+  required float amount = 3;
+}
+
+message UserDealWon {
+  required int32 userid = 1;
+  required int32 time = 2;
+  required float amount = 3;
+}
+
+message UserConnected {
+  required int32 userid = 1;
+}
+
+message UserDisconnected {
+  required int32 userid = 1;
+}
+
+message UserInfo {
+  required int32 userid = 1;
+  required string name = 2;
+  required int32 place = 3;
+  required float amount = 4;
+  message Place {
+    required int32 place = 1;
+    required float amount = 2;
+  }
+  repeated Place top = 5;
+  repeated Place around = 6;
+}
