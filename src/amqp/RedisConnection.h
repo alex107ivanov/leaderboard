@@ -2,6 +2,7 @@
 #define REDISCONNECTION_H_DEFINED
 
 #include <boost/noncopyable.hpp>
+#include <boost/signals2.hpp>
 
 #include <google/protobuf/message.h>
 
@@ -16,6 +17,16 @@
 class RedisConnection : private boost::noncopyable
 {
 public:
+	struct UserInfo
+	{
+		size_t userid;
+		std::string name;
+		size_t place;
+		float amount;
+		std::vector<std::pair<size_t, float>> top;
+		std::vector<std::pair<size_t, float>> around;
+	};
+
 	RedisConnection(std::ostream& out, const std::string& host, int port);
 
 	~RedisConnection();
@@ -27,6 +38,8 @@ public:
 	void storeDeal(size_t userid, float amount, size_t doy);
 
 	bool requestUserInfo(size_t userid);
+
+	boost::signals2::signal<void (const UserInfo&)> onUserInfo;
 
 private:
 	struct Deal

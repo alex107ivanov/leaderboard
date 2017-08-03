@@ -14,7 +14,8 @@ int main()
 
 	std::this_thread::sleep_for(std::chrono::seconds(1));
 
-	bool result = redisConnection.requestUserInfo(1000);
+	//bool result = redisConnection.requestUserInfo(1000);
+	bool result = redisConnection.requestUserInfo(14);
 
 	std::cout << " --- user info requested ? result = " << result << std::endl;
 

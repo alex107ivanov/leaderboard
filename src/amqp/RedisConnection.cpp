@@ -1,5 +1,9 @@
 #include "RedisConnection.h"
 
+#include <boost/lexical_cast.hpp>
+
+#include "split.h"
+
 RedisConnection::RedisConnection(std::ostream& out, const std::string& host, int port) :
 	_out(out), 
 	_redox(out, host, port, std::bind(&RedisConnection::redoxConnectedHandler, this)), 
@@ -246,9 +250,7 @@ bool RedisConnection::requestUserInfo(size_t userid)
 "    name = '-' "
 "end "
 " "
-"return {name .. '', score .. '', place .. '', table.concat(result, ','), table.concat(top, ',')}";
-
-/*"return table.concat({name, score, place, result, top}, '|')";*/
+"return {userid .. '', name .. '', score .. '', place .. '', table.concat(result, ','), table.concat(top, ',')}";
 
 	if (_redox.isConnected())
 	{
@@ -279,10 +281,113 @@ void RedisConnection::requestUserInfoReplyHandler(redox::Command<std::vector<std
 	}
 
 	_out << "Command complete. " << command.cmd() << ": " << std::endl;
+
+	UserInfo userInfo;
+
+/*
+	// userid
+      DATA: 1000
+
+	// name
+      DATA: -
+
+	// score
+      DATA: 1234.4999699999996
+
+	// place
+      DATA: 0
+
+	// around
+      DATA: 1000,1234.4999699999996,23,124.5,22,124,17,112.17,11,112.09999999999999,5,36.600000000000009,13,17.149999999999999,20,14.5,19,13.5,12,12.15,10,12.1
+
+	// top
+      DATA: 1000,1234.4999699999996,23,124.5,22,124,17,112.17,11,112.09999999999999,5,36.600000000000009,13,17.149999999999999,20,14.5,19,13.5,12,12.15,10,12.1
+*/
+
 	for (const auto& line : command.reply())
 	{
 		std::cout << "      DATA: " << line << std::endl;
 	}
+
+	const auto& reply = command.reply();
+
+	if (reply.size() != 6)
+	{
+		_out << "Reply size is wrong: " << reply.size() << std::endl;
+		return;
+	}
+
+	try
+	{
+		userInfo.userid = boost::lexical_cast<size_t>(reply[0]);
+		std::cout << " > userInfo.userid = " << userInfo.userid << std::endl;
+
+		userInfo.name = reply[1];
+		std::cout << " > userInfo.name = " << userInfo.name << std::endl;
+
+		userInfo.amount = boost::lexical_cast<float>(reply[2]);
+		std::cout << " > userInfo.amount = " << userInfo.amount << std::endl;
+
+		userInfo.place = boost::lexical_cast<size_t>(reply[3]);
+		std::cout << " > userInfo.place = " << userInfo.place << std::endl;
+
+		auto aroundParts = split(reply[4], ',');
+		if (aroundParts.size() % 2 != 0)
+		{
+			_out << "Wrong count of parts in around: " << aroundParts.size() << std::endl;
+			return;
+		}
+		for (size_t i = 0; i < aroundParts.size(); i += 2)
+		{
+			size_t userid = boost::lexical_cast<size_t>(aroundParts[i]);
+			float amount = boost::lexical_cast<float>(aroundParts[i + 1]);
+			userInfo.around.push_back({userid, amount});
+			std::cout << " > userInfo.around[" << userInfo.around.size() << "] = " << userInfo.around[userInfo.around.size() - 1].first << ", " << userInfo.around[userInfo.around.size() - 1].second << std::endl;
+		}
+
+		auto topParts = split(reply[5], ',');
+		if (topParts.size() % 2 != 0)
+		{
+			_out << "Wrong count of parts in top: " << topParts.size() << std::endl;
+			return;
+		}
+
+		for (size_t i = 0; i < topParts.size(); i += 2)
+		{
+			size_t userid = boost::lexical_cast<size_t>(topParts[i]);
+			float amount = boost::lexical_cast<float>(topParts[i + 1]);
+			userInfo.top.push_back({userid, amount});
+			std::cout << " > userInfo.top[" << userInfo.top.size() << "] = " << userInfo.top[userInfo.top.size() - 1].first << ", " << userInfo.top[userInfo.top.size() - 1].second << std::endl;
+		}
+	}
+	catch(const boost::bad_lexical_cast& error)
+	{
+		_out << "Erorr parsing reply: " << error.what() << std::endl;
+		return;
+	}
+
+	std::cout << "userInfo.userid = " << userInfo.userid << std::endl;
+	std::cout << "userInfo.name = " << userInfo.name << std::endl;
+	std::cout << "userInfo.amount = " << userInfo.amount << std::endl;
+	std::cout << "userInfo.place = " << userInfo.place << std::endl;
+	std::cout << "userInfo.around:" << std::endl;
+	for (const auto& around : userInfo.around)
+		std::cout << "   - " << around.first << ", " << around.second << std::endl;
+	std::cout << "userInfo.top:" << std::endl;
+	for (const auto& top : userInfo.top)
+		std::cout << "   - " << top.first << ", " << top.second << std::endl;
+
+	onUserInfo(userInfo);
+/*
+        struct UserInfo
+        {
+                size_t userid;
+                size_t place;
+                float amount;
+                std::vector<size_t> top;
+                std::vector<size_t> around;
+        };
+*/
 
 	return;
 }
