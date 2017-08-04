@@ -22,7 +22,9 @@ AMQP::AMQP(std::ostream& out, const std::string& host, int port, const std::stri
 
 AMQP::~AMQP()
 {
+#ifdef _DEBUG
 	_out << "[AMQP] destructor." << std::endl;
+#endif
 
 	{
 		boost::mutex::scoped_lock lock(_mutex);
@@ -37,7 +39,9 @@ AMQP::~AMQP()
 
 		disconnect();
 
+#ifdef _DEBUG
 		_out << "[AMQP] destructor waiting for thread." << std::endl;
+#endif
 	}
 
 	_conditionVariable.notify_all();
@@ -45,19 +49,22 @@ AMQP::~AMQP()
 	_inputThread->join();
 	_outputThread->join();
 
+#ifdef _DEBUG
 	_out << "[AMQP] destructor finished." << std::endl;
+#endif
 }
 
 void AMQP::disconnect()
 {
-//	boost::mutex::scoped_lock lock(_mutex);
-
+#ifdef _DEBUG
 	_out << "[AMQP] disconnect." << std::endl;
+#endif
 
 	if (!_connected)
 	{
+#ifdef _DEBUG
 		_out << "[AMQP] not connected." << std::endl;
-
+#endif
 		return;
 	}
 
@@ -67,16 +74,14 @@ void AMQP::disconnect()
 
 	_connected = false;
 
+#ifdef _DEBUG
 	_out << "[AMQP] disconnect done." << std::endl;
-
+#endif
 	return;
 }
 
 void AMQP::addQueue(const std::string& name, bool ack)
 {
-//	if (!connect())
-//		return;
-
 	boost::mutex::scoped_lock lock(_mutex);
 
 	Queue queue = {name, ack};
@@ -109,7 +114,9 @@ void AMQP::loadQueue(const Queue& queue)
 		return;
 	}
 
+#ifdef _DEBUG
 	_out << "[AMQP] Queue '" << queue.name << "' added." << std::endl;
+#endif
 
 	return;
 
@@ -117,9 +124,6 @@ void AMQP::loadQueue(const Queue& queue)
 
 void AMQP::addExchange(const std::string& name, const std::string& type, const std::string& routingKey, bool listen)
 {
-//	if (!connect())
-//		return;
-
 	boost::mutex::scoped_lock lock(_mutex);
 
 	Exchange exchange = {name, type, routingKey, listen};
@@ -172,7 +176,9 @@ amqp_table_t arguments
 
 void AMQP::send(const std::string& exchange, const std::string& routingKey, const std::string& data, bool persistent)
 {
+#ifdef _DEBUG
 	_out << "[AMQP] Storing message of " << data.size() << " bytes to '" << exchange << "'/'" << routingKey << "' to output queue." << std::endl;
+#endif
 
 	const auto& beginTime = std::chrono::high_resolution_clock::now();
 
@@ -181,13 +187,17 @@ void AMQP::send(const std::string& exchange, const std::string& routingKey, cons
 		bool full = false;
 		{
 			boost::mutex::scoped_lock lock(_mutex);
-			//_out << "[AMQP] Output buffer contains " << _outputBuffer.size() << " elements." << std::endl;
+#ifdef _DEBUG
+			_out << "[AMQP] Output buffer contains " << _outputBuffer.size() << " elements." << std::endl;
+#endif
 			full = _outputBuffer.full();
 		}
 
 		if (full)
 		{
-			//_out << "[AMQP] Output buffer is full!" << std::endl;
+#ifdef _DEBUG
+			_out << "[AMQP] Output buffer is full!" << std::endl;
+#endif
 			boost::this_thread::sleep(boost::posix_time::milliseconds(10));
 		}
 		else
@@ -303,7 +313,9 @@ bool AMQP::connect()
 			continue;
 		}
 
+#ifdef _DEBUG
 		_out << "[AMQP] TCP socket created." << std::endl;
+#endif
 
 		struct timeval timeout;
 		timeout.tv_sec = 5;
@@ -315,9 +327,9 @@ bool AMQP::connect()
 			continue;
 		}
 
+#ifdef _DEBUG
 		_out << "[AMQP] TCP socket connected." << std::endl;
-
-		
+#endif
 
 		if (!showError(amqp_login(_connection, _vhost.c_str(), 0, 131072/*frame max*/, 60/*heartbeat*/, AMQP_SASL_METHOD_PLAIN, _login.c_str(), _password.c_str())))
 		{
@@ -325,7 +337,9 @@ bool AMQP::connect()
 			continue;
 		}
 
+#ifdef _DEBUG
 		_out << "[AMQP] Login done." << std::endl;
+#endif
 
 		amqp_channel_open(_connection, 1);
 
@@ -335,7 +349,9 @@ bool AMQP::connect()
 			continue;
 		}
 
+#ifdef _DEBUG
 		_out << "[AMQP] Channel opened." << std::endl;
+#endif
 
 		amqp_basic_consume(_connection, 1, amqp_cstring_bytes("amq.rabbitmq.reply-to"), amqp_empty_bytes, 0, 1, 0, amqp_empty_table);
 		/*
@@ -354,7 +370,9 @@ bool AMQP::connect()
 			continue;
 		}
 
+#ifdef _DEBUG
 		_out << "[AMQP] Reply-to queue created." << std::endl;
+#endif
 
 		{
 			amqp_queue_declare_ok_t *r = amqp_queue_declare(_connection, 1, amqp_empty_bytes, 0, 0, 0, 1, amqp_empty_table);
@@ -376,7 +394,9 @@ bool AMQP::connect()
 
 			_directQueue = std::string((const char*)r->queue.bytes, r->queue.len);
 
+#ifdef _DEBUG
 			_out << "[AMQP] We created personal queue '" << _directQueue << "'" << std::endl;
+#endif
 		}
 
 		amqp_basic_consume(_connection, 1, to_amqp_bytes(_directQueue), amqp_empty_bytes, 0, 0, 0, amqp_empty_table);
@@ -428,14 +448,14 @@ void AMQP::inputRun()
 		struct timeval timeout;
 		timeout.tv_sec = 0;
 		timeout.tv_usec = 10000; // 0.01 sec
-//		timeout.tv_sec = 1;
-//		timeout.tv_usec = 0; // 1 sec
 
 		res = amqp_consume_message(_connection, &envelope, &timeout, 0);
 
 		if (AMQP_RESPONSE_NORMAL == res.reply_type)
 		{
+#ifdef _DEBUG
 			_out << "[AMQP] Got incomming message." << std::endl;
+#endif
 
 			Message message = parseEnvelope(envelope);
 
@@ -472,7 +492,9 @@ void AMQP::inputRun()
 		boost::this_thread::sleep(boost::posix_time::milliseconds(1));
 	}
 
+#ifdef _DEBUG
 	_out << "[AMQP] inputRun finished." << std::endl;
+#endif
 
 	return;
 }
@@ -481,28 +503,38 @@ AMQP::Message AMQP::parseEnvelope(const amqp_envelope_t& envelope)
 {
 	Message message;
 
+#ifdef _DEBUG
 	unsigned int deliveryTag = (unsigned int)envelope.delivery_tag;
+#endif
 	std::string exchange((const char*)envelope.exchange.bytes, envelope.exchange.len);
 	std::string routingKey((const char*)envelope.routing_key.bytes, envelope.routing_key.len);
 	std::string contentType;
 	std::string replyTo;
 	std::string data((const char*)envelope.message.body.bytes, envelope.message.body.len);
 
+#ifdef _DEBUG
 	_out << "[AMQP] Delivery " << deliveryTag << " '" << exchange << "' / '" << routingKey << "'" << std::endl;
+#endif
 
 	if (envelope.message.properties._flags & AMQP_BASIC_CONTENT_TYPE_FLAG)
 	{
 		contentType = std::string((const char*)envelope.message.properties.content_type.bytes, envelope.message.properties.content_type.len);
+#ifdef _DEBUG
 		_out << "[AMQP] Content-type: " << contentType << std::endl;
+#endif
 	}
 
 	if (envelope.message.properties._flags & AMQP_BASIC_REPLY_TO_FLAG)
 	{
 		replyTo = std::string((const char*)envelope.message.properties.reply_to.bytes, envelope.message.properties.reply_to.len);
+#ifdef _DEBUG
 		_out << "[AMQP] Reply-to: " << replyTo << std::endl;
+#endif
 	}
 
+#ifdef _DEBUG
 	_out << "[AMQP] Message size is " << data.size() << std::endl;
+#endif
 
 	message = {exchange, routingKey, contentType, replyTo, data};
 
@@ -522,11 +554,15 @@ void AMQP::outputRun()
 
 		if (_quit)
 		{
+#ifdef _DEBUG
 			_out << "[AMQP] AMQP::outputRun(): got quit flag." << std::endl;
+#endif
 			break;
 		}
 
+#ifdef _DEBUG
 		_out << "[AMQP] We got " << _outputBuffer.size() << " messages in output queue." << std::endl;
+#endif
 
 		lock.unlock();
 
@@ -536,7 +572,9 @@ void AMQP::outputRun()
 			continue;
 		}
 
+#ifdef _DEBUG
 		const auto& beginTime = std::chrono::high_resolution_clock::now();
+#endif
 		size_t sentCount = 0;
 
 		while (true)
@@ -545,7 +583,9 @@ void AMQP::outputRun()
 
 			if (_outputBuffer.empty())
 			{
+#ifdef _DEBUG
 				_out << "[AMQP] Ouptup queue is empty." << std::endl;
+#endif
 				break;
 			}
 
@@ -554,12 +594,13 @@ void AMQP::outputRun()
 			const auto& exchange = message.exchange;
 			const auto& routingKey = message.queue;
 			const auto& persistent = message.persistent;
+#ifdef _DEBUG
 			_out << "[AMQP] Sending message [first of " <<_outputBuffer.size() << "] of " << data.size() << " bytes to '" << exchange << "'/'" << routingKey << "'" << std::endl;
+#endif
 
 			amqp_basic_properties_t props;
 
 			props._flags = AMQP_BASIC_CONTENT_TYPE_FLAG;
-			//props.content_type = amqp_cstring_bytes("text/plain");
 			props.content_type = amqp_cstring_bytes("application/octet-stream");
 
 			if (persistent)
@@ -583,10 +624,9 @@ void AMQP::outputRun()
 
 			lock.unlock();
 
-			//boost::this_thread::sleep(boost::posix_time::milliseconds(1));
-
 			++sentCount;
 
+#ifdef _DEBUG
 			if (sentCount > 0 && sentCount % 500 == 0)
 			{
 				const auto& endTime = std::chrono::high_resolution_clock::now();
@@ -594,8 +634,10 @@ void AMQP::outputRun()
 				const auto& speed = static_cast<float>(msec * 1000.0) / sentCount;
 				_out << "[AMQP] " << sentCount << " messages sent, output speed is " << speed << " pkg/sec." << std::endl;
 			}
+#endif
 		}
 
+#ifdef _DEBUG
 		if (sentCount > 100)
 		{
 			const auto& endTime = std::chrono::high_resolution_clock::now();
@@ -603,9 +645,12 @@ void AMQP::outputRun()
 			const auto& speed = static_cast<float>(msec * 1000.0) / sentCount;
 			_out << "[AMQP] " << sentCount << " messages sent, output speed is " << speed << " pkg/sec." << std::endl;
 		}
+#endif
 	}
 
+#ifdef _DEBUG
 	_out << "[AMQP] outputRun finished." << std::endl;
+#endif
 
 	return;
 }

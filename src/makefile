@@ -17,4 +17,4 @@ clean:
 	rm -rf *.o $(EXECUTABLE)
 
 protobuf:
-	protoc --cpp_out=. --python_out=. protocol.proto
+	protoc --cpp_out=. --python_out=../test/rebbitmq protocol.proto

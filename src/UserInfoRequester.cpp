@@ -45,8 +45,11 @@ void UserInfoRequester::run()
 		}
 		//
 		{
+			// TODO remove this lock, it blocks enable/disable user => can block amqp receiver. copy of map?
 			std::unique_lock<std::mutex> lock(_mutex);
+#ifdef _DEBUG
 			_out << "RUN" << std::endl;
+#endif
 			for (const auto& userid : _users)
 			{
 				onRequest(userid.first);

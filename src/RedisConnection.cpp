@@ -321,9 +321,7 @@ void RedisConnection::requestUserInfoReplyHandler(redox::Command<std::vector<std
 
 	if(!command.ok())
 	{
-//#ifdef _DEBUG
 		_out << "Wrong answer on command." << std::endl;
-//#endif
 		return;
 	}
 
@@ -364,9 +362,7 @@ void RedisConnection::requestUserInfoReplyHandler(redox::Command<std::vector<std
 
 	if (reply.size() != 6)
 	{
-//#ifdef _DEBUG
 		_out << "Reply size is wrong: " << reply.size() << std::endl;
-//#endif
 		return;
 	}
 
@@ -395,9 +391,7 @@ void RedisConnection::requestUserInfoReplyHandler(redox::Command<std::vector<std
 		auto aroundParts = split(reply[4], ',');
 		if (aroundParts.size() % 2 != 0)
 		{
-//#ifdef _DEBUG
 			_out << "Wrong count of parts in around: " << aroundParts.size() << std::endl;
-//#endif
 			return;
 		}
 		for (size_t i = 0; i < aroundParts.size(); i += 2)
@@ -413,9 +407,7 @@ void RedisConnection::requestUserInfoReplyHandler(redox::Command<std::vector<std
 		auto topParts = split(reply[5], ',');
 		if (topParts.size() % 2 != 0)
 		{
-//#ifdef _DEBUG
 			_out << "Wrong count of parts in top: " << topParts.size() << std::endl;
-//#endif
 			return;
 		}
 
@@ -431,9 +423,7 @@ void RedisConnection::requestUserInfoReplyHandler(redox::Command<std::vector<std
 	}
 	catch(const boost::bad_lexical_cast& error)
 	{
-//#ifdef _DEBUG
 		_out << "Erorr parsing reply: " << error.what() << std::endl;
-//#endif
 		return;
 	}
 

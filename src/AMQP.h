@@ -2,31 +2,61 @@
 #include <string>
 #include <iostream>
 
-#include <amqp.h>
-
 #include <boost/thread.hpp>
 #include <boost/noncopyable.hpp>
 #include <boost/thread/condition_variable.hpp>
 #include <boost/signals2.hpp>
 #include <boost/circular_buffer.hpp>
 
+#include <amqp.h>
+
+/// Подключение к серверу AMQP.
 class AMQP : private boost::noncopyable
 {
 public:
-	AMQP(std::ostream& _out, const std::string& host, int port, const std::string& login, const std::string& password, const std::string& vhost);
+	/// Конструктор.
+	/// @param out Поток для вывода сообщений.
+	/// @param host Имя сервера для подключения.
+	/// @param port Порт для подключения.
+	/// @param login Имя пользователя.
+	/// @param password Пароль.
+	/// @param vhost Виртуальный хост.
+	AMQP(std::ostream& out, const std::string& host, int port, const std::string& login, const std::string& password, const std::string& vhost);
 
+	/// Деструктор.
 	~AMQP();
 
+	/// Добавляет точку обмена.
+	/// @param name Имя.
+	/// @param type Тип.
+	/// @param routingKey Ключ маршрутизации.
+	/// @param listen Признак необходимости получать сообщения.
 	void addExchange(const std::string& name, const std::string& type, const std::string& routingKey = "", bool listen = true);
 
+	/// Добавляет очередь.
+	/// @param name Имя.
+	/// @param persistent Признак persistent.
 	void addQueue(const std::string& name, bool persistent = false);
 
+	/// Отправляет сообщение.
+	/// @param exchange Точка обмена.
+	/// @param queue Очередь.
+	/// @param data Данные.
+	/// @param persistent Признак persistent.
 	void send(const std::string& exchange, const std::string& queue, const std::string& data, bool persistent = false);
 
+	/// Инициирует завершение работы.
 	void quit();
 
+	/// Возвращает управление по завершении работы.
 	void join();
 
+	/// Сигнал о поступлении сообщения.
+	/// @param exchange Точка обмена.
+	/// @param routingKey Ключь маршрутизации.
+	/// @param contentType Тип содержимого.
+	/// @param replyTo Адрес для ответа.
+	/// @param data Данные.
 	boost::signals2::signal<void (const std::string& /*exchange*/, const std::string& /*routingKey*/, const std::string& /*contentType*/, const std::string& /*replyTo*/, const std::string& /*data*/)> onMessage;
 
 private:

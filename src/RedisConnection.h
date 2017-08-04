@@ -14,26 +14,43 @@
 
 #include "UserInfo.h"
 
+/// Подключение к серверу redis.
 class RedisConnection : private boost::noncopyable
 {
 public:
+	/// Конструктор.
+	/// @param out Поток для вывода сообщений.
+	/// @param host Адрес сервера.
+	/// @param port Порт сервера.
 	RedisConnection(std::ostream& out, const std::string& host, int port);
 
+	/// Деструктор.
 	~RedisConnection();
 
+	/// Возвращает управление по завершении работы.
 	void join();
 
+	/// Инициирует завершение работы.
 	void quit();
 
+	/// Сохраняет данные о сделке.
+	/// @param userid Id пользователя.
+	/// @param amount Объем сделки.
+	/// @param doy День года.
 	void storeDeal(size_t userid, float amount, size_t doy);
 
+	/// Запрашивает информацию о пользователе.
+	/// @param userid Id пользователя.
 	bool requestUserInfo(size_t userid);
 
-	boost::signals2::signal<void (const UserInfo&)> onUserInfo;
-
+	/// Выводит статистику соединения.
 	void printStatistics();
 
+	/// Возвращает признак получения ответов на все запросы.
 	bool complete();
+
+	/// Сигнал о сформированных данных о пользователе.
+	boost::signals2::signal<void (const UserInfo&)> onUserInfo;
 
 private:
 	struct Deal
@@ -135,9 +152,7 @@ private:
 	private:
 		void run()
 		{
-//#ifdef _DEBUG
 			_out << "Connection::run()" << std::endl;
-//#endif
 
 			std::unique_lock<std::mutex> lock(_mutex);
 			while (!_quit)
@@ -152,16 +167,12 @@ private:
 
 				if (_quit)
 				{
-//#ifdef _DEBUG
 					_out << "Connection::run(): got signal for quit." << std::endl;
-//#endif
 					break;
 				}
 				else if (_connected)
 				{
-//#ifdef _DEBUG
 					_out << "Connection::run(): got signal for reconnect." << std::endl;
-//#endif
 				}
 
 				_connected = false;
@@ -185,15 +196,11 @@ private:
 
 				_connection.reset(new T);
 
-//#ifdef _DEBUG
 				_out << "Connection::run(): trying to connect " << _host << ":" << _port << "." << std::endl;
-//#endif
 				auto result = _connection->connect(_host, _port, std::bind(&Connection<T>::connectionStateChanged, this, std::placeholders::_1));
 				if (result)
 				{
-//#ifdef _DEBUG
 					_out << "Connection::run(): Connection successfull, calling handler!" << std::endl;
-//#endif
 					_connected = true;
 					lock.unlock();
 					_connectedHandler();
@@ -201,9 +208,7 @@ private:
 				}
 				else
 				{
-//#ifdef _DEBUG
 					_out << "Connection::run(): Connection error!" << std::endl;
-//#endif
 				}
 			}
 #ifdef _DEBUG

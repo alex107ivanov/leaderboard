@@ -163,7 +163,11 @@ void AMQPConnection::sendUserInfo(const UserInfo& userInfo)
 		return;
 	}
 
-	//_out << "Sending pb message '" << userInfoOut.DebugString() << "'" << std::endl;
+#ifdef _DEBUG
+	_out << "Sending pb message '" << userInfoOut.DebugString() << "'" << std::endl;
+#endif
 
 	_amqp.send("user_info", "", serialized, false);
+
+	return;
 }

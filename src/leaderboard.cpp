@@ -9,7 +9,6 @@
 
 int main()
 {
-	//RedisConnection redisConnection(std::cout, "95.213.252.217", 8081);
 	RedisConnection redisConnection(std::cout, "127.0.0.1", 6379);
 
 	AMQPConnection amqpConnection(std::cout, "127.0.0.1", 5672, "admin", "password", "/");
@@ -72,18 +71,12 @@ int main()
 		std::cout << "onUserDisconnected(" << userid << ")" << std::endl;
 		userInfoRequester.disableUser(userid);
 	});
-
-	//redisConnection.storeDeal(1000, 123.45f, 5);
-
-	//std::cout << " --- dial stored ?" << std::endl;
-
-	//std::this_thread::sleep_for(std::chrono::seconds(1));
-
-	//bool result = redisConnection.requestUserInfo(1000);
-	//bool result = redisConnection.requestUserInfo(14);
-
-	//std::cout << " --- user info requested ? result = " << result << std::endl;
 /*
+	redisConnection.storeDeal(1000, 123.45f, 5);
+
+	bool result = redisConnection.requestUserInfo(1000);
+	bool result = redisConnection.requestUserInfo(14);
+
 	std::this_thread::sleep_for(std::chrono::seconds(1));
 
 	auto start = std::chrono::system_clock::now();
@@ -116,10 +109,6 @@ int main()
 	amqpConnection.join();
 
 /*
-	std::this_thread::sleep_for(std::chrono::seconds(1));
-
-	redisConnection.printStatistics();
-
 	std::cout << "Runtime was " << elapsed.count() << " msec." << std::endl;
 */
 	return 0;
