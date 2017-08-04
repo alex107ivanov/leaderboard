@@ -13,7 +13,7 @@ int main()
 
 	AMQPConnection amqpConnection(std::cout, "127.0.0.1", 5672, "admin", "password", "/");
 
-	UserInfoRequester userInfoRequester(std::cout, 10);
+	UserInfoRequester userInfoRequester(std::cout, 60);
 
 	userInfoRequester.onRequest.connect([&redisConnection](size_t userid){
 		std::cout << "onRequest(" << userid << ")" << std::endl;
@@ -25,19 +25,6 @@ int main()
 	});
 
 	redisConnection.onUserInfo.connect([&amqpConnection](const UserInfo& userInfo){
-/*
-		std::cout << " ---==( UserInfo )==---" << std::endl;
-		std::cout << " userInfo.userid = " << userInfo.userid << std::endl;
-		std::cout << " userInfo.name = " << userInfo.name << std::endl;
-		std::cout << " userInfo.amount = " << userInfo.amount << std::endl;
-		std::cout << " userInfo.place = " << userInfo.place << std::endl;
-		std::cout << " userInfo.around:" << std::endl;
-		for (const auto& around : userInfo.around)
-			std::cout << "   - " << around.first << ", " << around.second << std::endl;
-		std::cout << " userInfo.top:" << std::endl;
-		for (const auto& top : userInfo.top)
-			std::cout << "   - " << top.first << ", " << top.second << std::endl;
-*/
 		std::cout << " userInfo.userid = " << userInfo.userid << std::endl;
 
 		amqpConnection.sendUserInfo(userInfo);
@@ -71,45 +58,11 @@ int main()
 		std::cout << "onUserDisconnected(" << userid << ")" << std::endl;
 		userInfoRequester.disableUser(userid);
 	});
-/*
-	redisConnection.storeDeal(1000, 123.45f, 5);
 
-	bool result = redisConnection.requestUserInfo(1000);
-	bool result = redisConnection.requestUserInfo(14);
-
-	std::this_thread::sleep_for(std::chrono::seconds(1));
-
-	auto start = std::chrono::system_clock::now();
-	for (size_t i = 0; i < 10000; ++i)
-	{
-		for (size_t j = 0; j < 100; ++j)
-		{
-			size_t userid = i * 100 + j; //rand() % 10000000 + 1;
-			redisConnection.storeDeal(userid, 1.1f, 9);
-		}
-
-		size_t userid = i * 100;//rand() % 1000000 + 1;
-		bool result = redisConnection.requestUserInfo(userid);
-	}
-	auto end = std::chrono::system_clock::now();
-	auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-
-	redisConnection.printStatistics();
-
-	while (!redisConnection.complete())
-	{
-		std::this_thread::sleep_for(std::chrono::seconds(10));
-		redisConnection.printStatistics();
-	}
-
-	redisConnection.quit();
-	amqpConnection.quit();
-*/
+	userInfoRequester.join();
 	redisConnection.join();
 	amqpConnection.join();
 
-/*
-	std::cout << "Runtime was " << elapsed.count() << " msec." << std::endl;
-*/
+
 	return 0;
 }
