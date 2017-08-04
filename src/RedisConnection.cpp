@@ -150,6 +150,7 @@ bool RedisConnection::storeDeal(const Deal& deal)
 	std::string strUserid = std::to_string(deal.userid);
 	std::string strAmount = std::to_string(deal.amount);
 	std::string strDoy = std::to_string(deal.doy);
+	// TODO to constants
 	std::string procedure =
 "local userid = tonumber(ARGV[1]) "
 "local score = tonumber(ARGV[2]) "
@@ -253,6 +254,7 @@ bool RedisConnection::requestUserInfo(size_t userid)
 	}
 
 	std::string strUserid = std::to_string(userid);
+	// TODO to constants
 	std::string procedure =
 "local userid = tonumber(ARGV[1]) "
 " "
